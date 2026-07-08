@@ -1,15 +1,64 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePotholes } from '../hooks/usePotholes';
-import { useReports } from '../hooks/useReports';
 import Map from '../components/Map';
 import ReportsList from '../components/ReportsList';
+import { socketService } from '../services/socket';
+import { Pothole } from '../types';
 
 const Dashboard: React.FC = () => {
-  const { potholes, loading: pLoading, error: pError } = usePotholes();
-  const { reports, loading: rLoading, error: rError } = useReports();
+  const { potholes, setPotholes, loading, error } = usePotholes();
+  const [reports, setReports] = useState<any[]>([]);
+  const [alert, setAlert] = useState<string | null>(null);
 
-  if (pLoading || rLoading) return <div>Loading dashboard...</div>;
-  if (pError || rError) return <div>Error: {pError || rError}</div>;
+  // Convert potholes to reports format (for list)
+  useEffect(() => {
+    if (potholes.length > 0) {
+      const formatted = potholes.map(p => ({
+        id: p.id,
+        location: `${p.location?.coordinates?.[1]?.toFixed(4) || ''}, ${p.location?.coordinates?.[0]?.toFixed(4) || ''}`,
+        sensorId: p.sensorId,
+        depth: p.depth,
+        confirms: p.citizenReports || 0,
+        distance: 0, // we don't have distance from user; can be calculated later
+        severity: p.severity,
+        status: p.status,
+      }));
+      setReports(formatted);
+    }
+  }, [potholes]);
+
+  // Socket for real-time updates
+  useEffect(() => {
+    const socket = socketService.connect();
+
+    // Listen for new/updated potholes
+    socket.on('pothole_update', (updatedPothole: Pothole) => {
+      setPotholes(prev => {
+        const existing = prev.find(p => p.id === updatedPothole.id);
+        if (existing) {
+          return prev.map(p => p.id === updatedPothole.id ? updatedPothole : p);
+        } else {
+          return [updatedPothole, ...prev];
+        }
+      });
+    });
+
+    // Listen for alerts (e.g., pothole ahead)
+    socket.on('alert', (data) => {
+      if (data.type === 'vibration' || data.type === 'depth') {
+        setAlert(`⚠️ Pothole ahead! ${data.message}`);
+        setTimeout(() => setAlert(null), 10000);
+      }
+    });
+
+    return () => {
+      socket.off('pothole_update');
+      socket.off('alert');
+    };
+  }, []);
+
+  if (loading) return <div>Loading dashboard...</div>;
+  if (error) return <div>Error: {error}</div>;
 
   return (
     <div style={{
@@ -27,13 +76,13 @@ const Dashboard: React.FC = () => {
         </p>
       </header>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '2fr 1fr',
-        gap: '24px',
-        flex: 1,
-        minHeight: 0,
-      }}>
+      {alert && (
+        <div style={{ backgroundColor: '#f44336', color: 'white', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
+          {alert}
+        </div>
+      )}
+
+      <div className="dashboard-grid">
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ flex: 1, minHeight: '200px' }}>
             <Map potholes={potholes} />
