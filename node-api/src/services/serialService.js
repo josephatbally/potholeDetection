@@ -5,17 +5,35 @@ const Pothole = require('../models/Pothole');
 const { findNearbyPothole } = require('./deduplicationService');
 const { sendAlert, sendPotholeUpdate } = require('./alertService');
 
-// Configuration – adjust these to match your setup
-const SERIAL_PORT = process.env.SERIAL_PORT || 'COM3';      // Windows: COM3, Linux: /dev/ttyUSB0
+// If SERIAL_PORT is not set, default to COM3 (Windows) or /dev/ttyUSB0 (Linux)
+const DEFAULT_PORT = process.platform === 'win32' ? 'COM3' : '/dev/ttyUSB0';
+const SERIAL_PORT = process.env.SERIAL_PORT || DEFAULT_PORT;
 const BAUD_RATE = 9600;
 const SENSOR_ID = process.env.SENSOR_ID || 'SENSOR-ARDUINO-01';
 const VEHICLE_NAME = process.env.VEHICLE_NAME || 'Arduino Test Vehicle';
 
 let port = null;
 let parser = null;
+let retryTimer = null;
+let isOpening = false;
+
+async function listPorts() {
+  try {
+    const ports = await SerialPort.list();
+    console.log('Available serial ports:');
+    ports.forEach(p => console.log(`  ${p.path} - ${p.manufacturer || 'Unknown'}`));
+    return ports;
+  } catch (err) {
+    console.error('Error listing ports:', err.message);
+    return [];
+  }
+}
 
 function startSerialListener() {
-  console.log(`Starting serial listener on ${SERIAL_PORT} at ${BAUD_RATE} baud`);
+  if (isOpening) return;
+  isOpening = true;
+
+  console.log(`Attempting to open serial port ${SERIAL_PORT} at ${BAUD_RATE} baud`);
 
   try {
     port = new SerialPort({
@@ -27,13 +45,17 @@ function startSerialListener() {
     parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
 
     port.open((err) => {
+      isOpening = false;
       if (err) {
         console.error('Error opening serial port:', err.message);
-        // Retry after 5 seconds
-        setTimeout(startSerialListener, 5000);
+        // List ports to help user
+        listPorts().then(() => {
+          console.log(`Please set SERIAL_PORT in .env to the correct port. Retrying in 10s...`);
+          retryTimer = setTimeout(startSerialListener, 10000);
+        });
         return;
       }
-      console.log(`Serial port ${SERIAL_PORT} opened successfully`);
+      console.log(`✅ Serial port ${SERIAL_PORT} opened successfully`);
     });
 
     parser.on('data', async (line) => {
@@ -41,37 +63,25 @@ function startSerialListener() {
       if (!line) return;
       console.log('Raw serial:', line);
 
-      // Expected format: "distance,pothole"   e.g. "25.4,1" or "-1,0"
       const parts = line.split(',');
       if (parts.length < 2) return;
 
       const distance = parseFloat(parts[0]);
       const potholeFlag = parseInt(parts[1]);
 
-      // Ignore invalid readings (distance = -1)
       if (distance < 0) return;
 
-      // Map distance to depth (depth = distance from sensor to road?)
-      // Assuming sensor is mounted 30cm above road, pothole depth = 30 - distance (if > 0)
-      const depth = Math.max(0, 30 - distance); // in cm
-
-      // Determine severity based on depth
+      const depth = Math.max(0, 30 - distance);
       let severity = 'minor';
       if (depth > 5) severity = 'moderate';
       if (depth > 10) severity = 'severe';
 
-      // If pothole flag is 1, we have a pothole
       if (potholeFlag === 1) {
-        // Use the current location – for demo we use a fixed coordinate.
-        // In real deployment you would have GPS module – we can mock or pass via serial.
-        // For now, we use a fixed location near Dar es Salaam.
         const lat = -6.7924;
         const lng = 39.2083;
 
-        // Check for existing pothole nearby
         const existing = await findNearbyPothole(lat, lng, 20);
         if (existing) {
-          // Update existing pothole with new depth/severity
           const updated = await Pothole.findByIdAndUpdate(
             existing._id,
             {
@@ -88,12 +98,8 @@ function startSerialListener() {
           sendAlert('depth', `Sensor ${SENSOR_ID} updated pothole ${updated._id}`, { potholeId: updated._id });
           console.log(`Updated pothole ${updated._id}`);
         } else {
-          // Create new pothole
           const newPothole = new Pothole({
-            location: {
-              type: 'Point',
-              coordinates: [lng, lat],
-            },
+            location: { type: 'Point', coordinates: [lng, lat] },
             severity,
             depth,
             sensorId: SENSOR_ID,
@@ -108,14 +114,12 @@ function startSerialListener() {
         }
       }
 
-      // Update sensor status (last reading, battery, etc.)
       await Sensor.findOneAndUpdate(
         { sensorId: SENSOR_ID },
         {
           $set: {
             lastReading: new Date(),
             status: 'online',
-            // battery: we can add a fixed value or parse from serial if sent
           },
           $setOnInsert: { vehicle: VEHICLE_NAME },
         },
@@ -125,22 +129,28 @@ function startSerialListener() {
 
     port.on('error', (err) => {
       console.error('Serial port error:', err.message);
-      // Attempt to reopen after error
-      setTimeout(startSerialListener, 5000);
+      if (!port?.isOpen) {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(startSerialListener, 5000);
+      }
     });
 
     port.on('close', () => {
       console.log('Serial port closed. Reopening in 5s...');
-      setTimeout(startSerialListener, 5000);
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(startSerialListener, 5000);
     });
 
   } catch (error) {
+    isOpening = false;
     console.error('Failed to start serial listener:', error.message);
-    setTimeout(startSerialListener, 5000);
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(startSerialListener, 5000);
   }
 }
 
 function stopSerialListener() {
+  clearTimeout(retryTimer);
   if (parser) {
     parser.removeAllListeners();
     parser = null;
