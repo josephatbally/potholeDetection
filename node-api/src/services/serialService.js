@@ -11,11 +11,13 @@ const SERIAL_PORT = process.env.SERIAL_PORT || DEFAULT_PORT;
 const BAUD_RATE = 9600;
 const SENSOR_ID = process.env.SENSOR_ID || 'SENSOR-ARDUINO-01';
 const VEHICLE_NAME = process.env.VEHICLE_NAME || 'Arduino Test Vehicle';
+const MOCK_SENSOR = process.env.MOCK_SENSOR === 'true';
 
 let port = null;
 let parser = null;
 let retryTimer = null;
 let isOpening = false;
+let mockInterval = null;
 
 async function listPorts() {
   try {
@@ -30,6 +32,76 @@ async function listPorts() {
 }
 
 function startSerialListener() {
+  if (MOCK_SENSOR) {
+    console.log('🔁 MOCK SENSOR MODE ENABLED – generating fake sensor data every 3s');
+    if (mockInterval) clearInterval(mockInterval);
+    mockInterval = setInterval(async () => {
+      const distance = 20 + Math.random() * 20; // 20-40 cm
+      const potholeFlag = distance > 30 ? 1 : 0;
+      const depth = Math.max(0, distance - 30); // correct depth: extra distance beyond 30cm
+      let severity = 'minor';
+      if (depth > 5) severity = 'moderate';
+      if (depth > 10) severity = 'severe';
+
+      console.log(`Mock: distance=${distance.toFixed(1)}cm, pothole=${potholeFlag}, depth=${depth.toFixed(1)}cm`);
+
+      if (potholeFlag === 1) {
+        const lat = -6.7924 + (Math.random() - 0.5) * 0.01;
+        const lng = 39.2083 + (Math.random() - 0.5) * 0.01;
+
+        const existing = await findNearbyPothole(lat, lng, 20);
+        if (existing) {
+          const updated = await Pothole.findByIdAndUpdate(
+            existing._id,
+            {
+              $set: {
+                depth,
+                severity,
+                sensorScore: Math.min(100, (existing.sensorScore || 0) + 5),
+                updatedAt: new Date(),
+              },
+            },
+            { new: true }
+          );
+          sendPotholeUpdate(updated);
+          sendAlert('depth', `Mock sensor updated pothole ${updated._id}`, { potholeId: updated._id });
+          console.log(`Updated mock pothole ${updated._id}`);
+        } else {
+          const newPothole = new Pothole({
+            location: { type: 'Point', coordinates: [lng, lat] },
+            severity,
+            depth,
+            sensorId: SENSOR_ID,
+            source: 'sensor',
+            sensorScore: 50,
+            status: 'detected',
+          });
+          await newPothole.save();
+          sendPotholeUpdate(newPothole);
+          sendAlert('vibration', `Mock sensor detected new pothole`, { potholeId: newPothole._id });
+
+          const notification = new Notification({
+            title: '🚧 Mock Pothole Detected',
+            message: `A pothole (depth ${depth.toFixed(1)}cm, severity: ${severity}) has been detected.`,
+            type: 'road_closed',
+            target: 'citizens',
+            relatedPothole: newPothole._id,
+          });
+          await notification.save();
+          sendAlert('notification', {
+            title: notification.title,
+            message: notification.message,
+            type: notification.type,
+            notificationId: notification._id,
+            createdAt: notification.createdAt,
+          });
+          console.log(`✅ Created mock pothole ${newPothole._id}`);
+        }
+      }
+    }, 3000);
+    return;
+  }
+
   if (isOpening) return;
   isOpening = true;
 
@@ -49,8 +121,8 @@ function startSerialListener() {
       if (err) {
         console.error('Error opening serial port:', err.message);
         listPorts().then(() => {
-          console.log(`Please set SERIAL_PORT in .env to the correct port. Retrying in 10s...`);
-          retryTimer = setTimeout(startSerialListener, 10000);
+          console.log(`Please set SERIAL_PORT in .env to the correct port. Retrying in 15s...`);
+          retryTimer = setTimeout(startSerialListener, 15000);
         });
         return;
       }
@@ -70,18 +142,19 @@ function startSerialListener() {
 
       if (distance < 0) return;
 
-      const depth = Math.max(0, 30 - distance);
+      // Correct depth: extra distance beyond 30cm (sensor height)
+      const depth = Math.max(0, distance - 30);
       let severity = 'minor';
       if (depth > 5) severity = 'moderate';
       if (depth > 10) severity = 'severe';
 
       if (potholeFlag === 1) {
+        // Use a fixed location for now (you can later add GPS)
         const lat = -6.7924;
         const lng = 39.2083;
 
         const existing = await findNearbyPothole(lat, lng, 20);
         if (existing) {
-          // Update existing pothole
           const updated = await Pothole.findByIdAndUpdate(
             existing._id,
             {
@@ -98,7 +171,6 @@ function startSerialListener() {
           sendAlert('depth', `Sensor ${SENSOR_ID} updated pothole ${updated._id}`, { potholeId: updated._id });
           console.log(`Updated pothole ${updated._id}`);
         } else {
-          // Create new pothole
           const newPothole = new Pothole({
             location: { type: 'Point', coordinates: [lng, lat] },
             severity,
@@ -112,17 +184,14 @@ function startSerialListener() {
           sendPotholeUpdate(newPothole);
           sendAlert('vibration', `New pothole detected by ${SENSOR_ID}`, { potholeId: newPothole._id });
 
-          // ✅ Create a notification for citizens (road closure/alert)
           const notification = new Notification({
             title: '🚧 New Pothole Detected',
-            message: `A pothole (depth ${depth.toFixed(1)}cm, severity: ${severity}) has been detected near Dar es Salaam. Please drive carefully.`,
-            type: 'road_closed',  // or 'alert'
+            message: `A pothole (depth ${depth.toFixed(1)}cm, severity: ${severity}) has been detected. Please drive carefully.`,
+            type: 'road_closed',
             target: 'citizens',
             relatedPothole: newPothole._id,
           });
           await notification.save();
-
-          // Emit notification via Socket.IO
           sendAlert('notification', {
             title: notification.title,
             message: notification.message,
@@ -130,12 +199,10 @@ function startSerialListener() {
             notificationId: notification._id,
             createdAt: notification.createdAt,
           });
-
           console.log(`✅ Created new pothole ${newPothole._id} and sent notification`);
         }
       }
 
-      // Update sensor status
       await Sensor.findOneAndUpdate(
         { sensorId: SENSOR_ID },
         {
@@ -153,26 +220,27 @@ function startSerialListener() {
       console.error('Serial port error:', err.message);
       if (!port?.isOpen) {
         clearTimeout(retryTimer);
-        retryTimer = setTimeout(startSerialListener, 5000);
+        retryTimer = setTimeout(startSerialListener, 15000);
       }
     });
 
     port.on('close', () => {
-      console.log('Serial port closed. Reopening in 5s...');
+      console.log('Serial port closed. Reopening in 15s...');
       clearTimeout(retryTimer);
-      retryTimer = setTimeout(startSerialListener, 5000);
+      retryTimer = setTimeout(startSerialListener, 15000);
     });
 
   } catch (error) {
     isOpening = false;
     console.error('Failed to start serial listener:', error.message);
     clearTimeout(retryTimer);
-    retryTimer = setTimeout(startSerialListener, 5000);
+    retryTimer = setTimeout(startSerialListener, 15000);
   }
 }
 
 function stopSerialListener() {
   clearTimeout(retryTimer);
+  if (mockInterval) clearInterval(mockInterval);
   if (parser) {
     parser.removeAllListeners();
     parser = null;
