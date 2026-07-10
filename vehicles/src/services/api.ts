@@ -6,11 +6,11 @@ export const fetchPotholes = async (params = {}) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to fetch potholes');
   const data = await res.json();
-  // Transform to frontend format (lat, lng)
   return (data.potholes || []).map((p: any) => ({
     ...p,
-    lat: p.location.coordinates[1],
-    lng: p.location.coordinates[0],
+    lat: p.location?.coordinates?.[1] ?? 0,
+    lng: p.location?.coordinates?.[0] ?? 0,
+    locationName: p.locationName || `${p.location?.coordinates?.[1]?.toFixed(4) || '0'}, ${p.location?.coordinates?.[0]?.toFixed(4) || '0'}`,
   }));
 };
 

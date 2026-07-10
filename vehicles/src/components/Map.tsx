@@ -30,14 +30,38 @@ interface MapProps {
 }
 
 const Map: React.FC<MapProps> = ({ potholes }) => {
-  const center: [number, number] = potholes.length > 0 ? [potholes[0].lat, potholes[0].lng] : [-6.7924, 39.2083];
+  const defaultCenter: [number, number] = [-6.7924, 39.2083];
+  
+  // Filter out potholes with invalid coordinates
+  const validPotholes = potholes.filter(p => 
+    typeof p.lat === 'number' && typeof p.lng === 'number'
+  );
+  
+  const center: [number, number] = validPotholes.length > 0
+    ? [validPotholes[0].lat, validPotholes[0].lng]
+    : defaultCenter;
+
   return (
     <div style={{ height: '100%', width: '100%', minHeight: '200px' }}>
       <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        {potholes.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={getMarkerIcon(p.severity, p.status)}>
-            <Popup>{p.id}</Popup>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        {validPotholes.map((p) => (
+          <Marker
+            key={p.id}
+            position={[p.lat, p.lng]}
+            icon={getMarkerIcon(p.severity, p.status)}
+          >
+            <Popup>
+              <strong>{p.id}</strong><br />
+              Severity: {p.severity}<br />
+              Status: {p.status}<br />
+              {p.depth && `Depth: ${p.depth}cm`}<br />
+              {p.sensorId && `Sensor: ${p.sensorId}`}<br />
+              Confirms: {p.citizenReports || 0}
+            </Popup>
           </Marker>
         ))}
       </MapContainer>

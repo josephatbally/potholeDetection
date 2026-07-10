@@ -7,7 +7,6 @@ interface ReportsListProps {
 }
 
 const ReportsList: React.FC<ReportsListProps> = ({ reports, notifications = [] }) => {
-  // Combine and sort by time (newest first)
   const combined = [
     ...notifications.map(n => ({
       id: n.id,
@@ -27,7 +26,6 @@ const ReportsList: React.FC<ReportsListProps> = ({ reports, notifications = [] }
     return <p style={{ color: '#888' }}>No reports nearby.</p>;
   }
 
-  // Color mapping for notification types
   const colorMap: Record<string, string> = {
     info: '#2196f3',
     warning: '#ff9800',
@@ -35,7 +33,7 @@ const ReportsList: React.FC<ReportsListProps> = ({ reports, notifications = [] }
     resolved: '#4caf50',
     urgent: '#ff5722',
     success: '#4caf50',
-    road_closed: '#9c27b0', // purple for road closed
+    road_closed: '#9c27b0',
     general: '#607d8b',
     repair_done: '#4caf50',
   };
