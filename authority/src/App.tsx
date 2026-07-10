@@ -9,6 +9,7 @@ import SensorNetwork from './pages/SensorNetwork';
 import RepairCrews from './pages/RepairCrews';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import Notifications from './pages/Notifications';
 import './App.css';
 
 function App() {
@@ -24,11 +25,11 @@ function App() {
             <Route path="crews" element={<RepairCrews />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="notifications" element={<Notifications />} />
           </Route>
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
   );
 }
-
 export default App;
