@@ -13,12 +13,10 @@ exports.createNotification = async (req, res) => {
     });
     await notification.save();
 
-    // Emit real‑time event via Socket.IO
-    sendAlert('notification', {
-      title,
-      message,
-      type,
-      target,
+    // ✅ FIX: send message as string, extra data in third argument
+    sendAlert('notification', notification.message, {
+      title: notification.title,
+      type: notification.type,
       notificationId: notification._id,
       createdAt: notification.createdAt,
     });

@@ -36,9 +36,9 @@ function startSerialListener() {
     console.log('🔁 MOCK SENSOR MODE ENABLED – generating fake sensor data every 3s');
     if (mockInterval) clearInterval(mockInterval);
     mockInterval = setInterval(async () => {
-      const distance = 20 + Math.random() * 20; // 20-40 cm
+      const distance = 20 + Math.random() * 20;
       const potholeFlag = distance > 30 ? 1 : 0;
-      const depth = Math.max(0, distance - 30); // correct depth: extra distance beyond 30cm
+      const depth = Math.max(0, distance - 30);
       let severity = 'minor';
       if (depth > 5) severity = 'moderate';
       if (depth > 10) severity = 'severe';
@@ -88,9 +88,9 @@ function startSerialListener() {
             relatedPothole: newPothole._id,
           });
           await notification.save();
-          sendAlert('notification', {
+          // ✅ FIX: send message as string, extra data in third argument
+          sendAlert('notification', notification.message, {
             title: notification.title,
-            message: notification.message,
             type: notification.type,
             notificationId: notification._id,
             createdAt: notification.createdAt,
@@ -142,14 +142,12 @@ function startSerialListener() {
 
       if (distance < 0) return;
 
-      // Correct depth: extra distance beyond 30cm (sensor height)
       const depth = Math.max(0, distance - 30);
       let severity = 'minor';
       if (depth > 5) severity = 'moderate';
       if (depth > 10) severity = 'severe';
 
       if (potholeFlag === 1) {
-        // Use a fixed location for now (you can later add GPS)
         const lat = -6.7924;
         const lng = 39.2083;
 
@@ -192,9 +190,9 @@ function startSerialListener() {
             relatedPothole: newPothole._id,
           });
           await notification.save();
-          sendAlert('notification', {
+          // ✅ FIX: send message as string, extra data in third argument
+          sendAlert('notification', notification.message, {
             title: notification.title,
-            message: notification.message,
             type: notification.type,
             notificationId: notification._id,
             createdAt: notification.createdAt,
