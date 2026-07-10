@@ -5,12 +5,14 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 const connectDB = require('./src/config/db');
 const { init: initAlerts } = require('./src/services/alertService');
+const { startSerialListener } = require('./src/services/serialService');
 
 // Import routes
 const potholeRoutes = require('./src/routes/potholeRoutes');
 const sensorRoutes = require('./src/routes/sensorRoutes');
 const crewRoutes = require('./src/routes/crewRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
+const notificationRoutes = require('./src/routes/notificationRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -44,6 +46,7 @@ app.use('/api/potholes', potholeRoutes);
 app.use('/api/sensors', sensorRoutes);
 app.use('/api/crews', crewRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -53,4 +56,6 @@ app.get('/health', (req, res) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  // Start serial listener after server is up
+  startSerialListener();
 });
