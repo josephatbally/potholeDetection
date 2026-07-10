@@ -56,13 +56,16 @@ const Dashboard: React.FC = () => {
       });
     });
     socket.on('alert', (data) => {
+      // data = { type, message, timestamp, data: { ... } }
       if (data.type === 'notification') {
+        // ✅ FIX: extra data is in data.data
+        const extra = data.data || {};
         const newNotif: Notification = {
-          id: data.notificationId || Date.now().toString(),
-          title: data.title || 'Notification',
-          message: data.message,
-          type: data.type || 'info',
-          createdAt: data.createdAt || new Date().toISOString(),
+          id: extra.notificationId || Date.now().toString(),
+          title: extra.title || 'Notification',
+          message: data.message, // now message is a string
+          type: extra.type || 'info',
+          createdAt: extra.createdAt || new Date().toISOString(),
         };
         setNotifications(prev => [newNotif, ...prev]);
       } else if (data.type === 'vibration' || data.type === 'depth') {
