@@ -2,10 +2,10 @@ const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 const Sensor = require('../models/Sensor');
 const Pothole = require('../models/Pothole');
+const Notification = require('../models/Notification');
 const { findNearbyPothole } = require('./deduplicationService');
 const { sendAlert, sendPotholeUpdate } = require('./alertService');
 
-// If SERIAL_PORT is not set, default to COM3 (Windows) or /dev/ttyUSB0 (Linux)
 const DEFAULT_PORT = process.platform === 'win32' ? 'COM3' : '/dev/ttyUSB0';
 const SERIAL_PORT = process.env.SERIAL_PORT || DEFAULT_PORT;
 const BAUD_RATE = 9600;
@@ -48,7 +48,6 @@ function startSerialListener() {
       isOpening = false;
       if (err) {
         console.error('Error opening serial port:', err.message);
-        // List ports to help user
         listPorts().then(() => {
           console.log(`Please set SERIAL_PORT in .env to the correct port. Retrying in 10s...`);
           retryTimer = setTimeout(startSerialListener, 10000);
@@ -82,6 +81,7 @@ function startSerialListener() {
 
         const existing = await findNearbyPothole(lat, lng, 20);
         if (existing) {
+          // Update existing pothole
           const updated = await Pothole.findByIdAndUpdate(
             existing._id,
             {
@@ -98,6 +98,7 @@ function startSerialListener() {
           sendAlert('depth', `Sensor ${SENSOR_ID} updated pothole ${updated._id}`, { potholeId: updated._id });
           console.log(`Updated pothole ${updated._id}`);
         } else {
+          // Create new pothole
           const newPothole = new Pothole({
             location: { type: 'Point', coordinates: [lng, lat] },
             severity,
@@ -110,10 +111,31 @@ function startSerialListener() {
           await newPothole.save();
           sendPotholeUpdate(newPothole);
           sendAlert('vibration', `New pothole detected by ${SENSOR_ID}`, { potholeId: newPothole._id });
-          console.log(`Created new pothole ${newPothole._id}`);
+
+          // ✅ Create a notification for citizens (road closure/alert)
+          const notification = new Notification({
+            title: '🚧 New Pothole Detected',
+            message: `A pothole (depth ${depth.toFixed(1)}cm, severity: ${severity}) has been detected near Dar es Salaam. Please drive carefully.`,
+            type: 'road_closed',  // or 'alert'
+            target: 'citizens',
+            relatedPothole: newPothole._id,
+          });
+          await notification.save();
+
+          // Emit notification via Socket.IO
+          sendAlert('notification', {
+            title: notification.title,
+            message: notification.message,
+            type: notification.type,
+            notificationId: notification._id,
+            createdAt: notification.createdAt,
+          });
+
+          console.log(`✅ Created new pothole ${newPothole._id} and sent notification`);
         }
       }
 
+      // Update sensor status
       await Sensor.findOneAndUpdate(
         { sensorId: SENSOR_ID },
         {
